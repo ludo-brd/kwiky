@@ -393,7 +393,16 @@
       return false;
     }
     el.focus();
-    el.setRangeText(plain, triggerStart, triggerEnd, "end");
+    el.setSelectionRange(triggerStart, triggerEnd);
+    // execCommand("insertText") déclenche un vrai InputEvent reconnu par React/Vue/Angular
+    if (document.execCommand("insertText", false, plain)) return true;
+    // Fallback : contourne le setter React en passant par le prototype natif
+    const proto = el.tagName === "TEXTAREA"
+      ? window.HTMLTextAreaElement.prototype
+      : window.HTMLInputElement.prototype;
+    const newVal = value.substring(0, triggerStart) + plain + value.substring(triggerEnd);
+    Object.getOwnPropertyDescriptor(proto, "value").set.call(el, newVal);
+    el.setSelectionRange(triggerStart + plain.length, triggerStart + plain.length);
     el.dispatchEvent(new Event("input", { bubbles: true }));
     el.dispatchEvent(new Event("change", { bubbles: true }));
     return true;

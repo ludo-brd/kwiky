@@ -488,43 +488,69 @@
     sel.removeAllRanges();
     sel.addRange(triggerRange);
 
+    const plain = htmlToPlain(html);
+
+    // 1. Paste event — intercepté par Quill, Draft.js, Slate, TinyMCE, etc.
+    try {
+      const dt = new DataTransfer();
+      dt.setData("text/html", html);
+      dt.setData("text/plain", plain);
+      const pasteEv = new ClipboardEvent("paste", {
+        bubbles: true,
+        cancelable: true,
+        clipboardData: dt,
+      });
+      target.dispatchEvent(pasteEv);
+      if (pasteEv.defaultPrevented) {
+        target.dispatchEvent(new Event("input", { bubbles: true }));
+        return true;
+      }
+    } catch (err) {
+      log("paste event a échoué", err);
+    }
+
+    // 2. execCommand insertHTML
     let success = false;
     try {
       success = document.execCommand("insertHTML", false, html);
     } catch (err) {
-      log("execCommand a échoué", err);
+      log("execCommand insertHTML a échoué", err);
     }
+    if (success) return true;
 
-    if (!success) {
-      try {
-        triggerRange.deleteContents();
-        const tmp = document.createElement("div");
-        tmp.innerHTML = html;
-        const frag = document.createDocumentFragment();
-        let lastNode = null;
-        while (tmp.firstChild) {
-          lastNode = tmp.firstChild;
-          frag.appendChild(lastNode);
-        }
-        triggerRange.insertNode(frag);
-        if (lastNode) {
-          const after = document.createRange();
-          after.setStartAfter(lastNode);
-          after.collapse(true);
-          sel.removeAllRanges();
-          sel.addRange(after);
-        }
-        success = true;
-      } catch (err) {
-        console.warn(LOG, "fallback DOM insert a échoué", err);
-        return false;
+    // 3. execCommand insertText (texte brut)
+    try {
+      success = document.execCommand("insertText", false, plain);
+    } catch (err) {
+      log("execCommand insertText a échoué", err);
+    }
+    if (success) return true;
+
+    // 4. Manipulation DOM directe
+    try {
+      triggerRange.deleteContents();
+      const tmp = document.createElement("div");
+      tmp.innerHTML = html;
+      const frag = document.createDocumentFragment();
+      let lastNode = null;
+      while (tmp.firstChild) {
+        lastNode = tmp.firstChild;
+        frag.appendChild(lastNode);
       }
-    }
-
-    if (!success) {
+      triggerRange.insertNode(frag);
+      if (lastNode) {
+        const after = document.createRange();
+        after.setStartAfter(lastNode);
+        after.collapse(true);
+        sel.removeAllRanges();
+        sel.addRange(after);
+      }
       target.dispatchEvent(new Event("input", { bubbles: true }));
+      return true;
+    } catch (err) {
+      console.warn(LOG, "fallback DOM insert a échoué", err);
+      return false;
     }
-    return true;
   }
 
   function confirmReplacement() {

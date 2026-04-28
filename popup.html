@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <title>Raccourcis Texte</title>
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+  <header class="app-header">
+    <div class="brand">
+      <div class="brand-logo">R</div>
+      <div>
+        <h1>Raccourcis Texte</h1>
+        <p class="subtitle">Insérez du texte formaté en un mot-clé</p>
+      </div>
+    </div>
+    <button id="newBtn" class="btn btn-primary" type="button">
+      <span class="plus">+</span> Nouveau
+    </button>
+  </header>
+
+  <section id="listView" class="view">
+    <div class="search-row">
+      <input id="searchInput" type="text" placeholder="Rechercher un raccourci…" />
+    </div>
+
+    <div id="emptyState" class="empty-state hidden">
+      <div class="empty-illustration">✦</div>
+      <h2>Aucun raccourci</h2>
+      <p>Créez votre premier raccourci pour insérer rapidement vos textes.</p>
+      <button id="emptyCreateBtn" class="btn btn-primary" type="button">Créer un raccourci</button>
+    </div>
+
+    <ul id="shortcutsList" class="shortcuts-list"></ul>
+
+    <footer class="list-footer">
+      <button id="importBtn" class="btn btn-ghost btn-sm" type="button" title="Importer un fichier JSON">
+        <span class="ico">↥</span> Importer
+      </button>
+      <button id="exportBtn" class="btn btn-ghost btn-sm" type="button" title="Exporter dans un fichier JSON">
+        <span class="ico">↧</span> Exporter
+      </button>
+      <input id="importFile" type="file" accept="application/json,.json" hidden />
+    </footer>
+  </section>
+
+  <section id="editView" class="view hidden">
+    <div class="edit-header">
+      <button id="backBtn" class="btn btn-ghost" type="button">← Retour</button>
+      <h2 id="editTitle">Nouveau raccourci</h2>
+    </div>
+
+    <form id="editForm" class="edit-form">
+      <label class="field">
+        <span class="field-label">Mot-clé</span>
+        <input id="triggerInput" type="text" placeholder="ex: goodbye" autocomplete="off" required />
+        <span class="field-hint">Le mot qui déclenchera la proposition de remplacement.</span>
+      </label>
+
+      <div class="field">
+        <span class="field-label">Texte de remplacement</span>
+        <div class="editor-toolbar" role="toolbar" aria-label="Mise en forme">
+          <button type="button" class="tb" data-cmd="bold" title="Gras"><b>B</b></button>
+          <button type="button" class="tb" data-cmd="italic" title="Italique"><i>I</i></button>
+          <button type="button" class="tb" data-cmd="underline" title="Souligné"><u>U</u></button>
+          <button type="button" class="tb" data-cmd="strikeThrough" title="Barré"><s>S</s></button>
+          <span class="tb-sep"></span>
+          <button type="button" class="tb" data-cmd="insertUnorderedList" title="Liste à puces">•</button>
+          <button type="button" class="tb" data-cmd="insertOrderedList" title="Liste numérotée">1.</button>
+          <span class="tb-sep"></span>
+          <label class="tb tb-color" title="Couleur du texte">
+            <span>A</span>
+            <input type="color" data-cmd="foreColor" value="#111827" />
+          </label>
+          <button type="button" class="tb" data-cmd="removeFormat" title="Effacer la mise en forme">⨯</button>
+        </div>
+        <div id="contentEditor" class="content-editor" contenteditable="true" data-placeholder="ex: Merci de votre attention et à bientôt"></div>
+      </div>
+
+      <div class="form-actions">
+        <button id="deleteBtn" type="button" class="btn btn-danger hidden">Supprimer</button>
+        <div class="grow"></div>
+        <button id="cancelBtn" type="button" class="btn btn-ghost">Annuler</button>
+        <button id="saveBtn" type="submit" class="btn btn-primary">Enregistrer</button>
+      </div>
+    </form>
+  </section>
+
+  <script src="popup.js"></script>
+</body>
+</html>

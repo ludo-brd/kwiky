@@ -3,29 +3,19 @@
   window.__raccourcisInstalled = true;
 
   const STORAGE_KEY = "shortcuts";
-  const LOG = "[Raccourcis]";
   let shortcuts = [];
   let storageReady = false;
-
-  function log(...args) {
-    if (window.__raccourcisDebug) console.log(LOG, ...args);
-  }
-  window.__raccourcisDebug = true;
 
   if (chrome?.storage?.local) {
     chrome.storage.local.get(STORAGE_KEY, (data) => {
       shortcuts = (data && data[STORAGE_KEY]) || [];
       storageReady = true;
-      log("chargés:", shortcuts.length, shortcuts.map((s) => s.trigger));
     });
     chrome.storage.onChanged.addListener((changes, area) => {
       if (area === "local" && changes[STORAGE_KEY]) {
         shortcuts = changes[STORAGE_KEY].newValue || [];
-        log("mis à jour:", shortcuts.length, shortcuts.map((s) => s.trigger));
       }
     });
-  } else {
-    console.warn(LOG, "chrome.storage indisponible — content script peut être hors contexte");
   }
 
   const DELIMITER_RE = /[\s.,!?;:]/;
@@ -304,7 +294,6 @@
       el.addEventListener("pointerdown", (e) => e.preventDefault());
     });
     popupShadow.querySelector("[data-confirm]").addEventListener("click", (e) => {
-      log("clic sur Remplacer reçu");
       e.preventDefault();
       e.stopPropagation();
       confirmReplacement();
@@ -348,9 +337,7 @@
         sel.removeAllRanges();
         sel.addRange(info.range);
       }
-    } catch (err) {
-      console.warn(LOG, "restoreCaret a échoué", err);
-    }
+    } catch (_) {}
   }
 
   function showPopup(target, shortcut, mode) {
@@ -367,7 +354,6 @@
     requestAnimationFrame(() => popupRoot.classList.add("show"));
     if (popupTimer) clearTimeout(popupTimer);
     popupTimer = setTimeout(hidePopup, AUTO_DISMISS_MS);
-    log("popup affichée pour", shortcut.trigger, "mode:", mode);
   }
 
   function hidePopup(markDismissed) {
@@ -402,7 +388,6 @@
     if (triggerStart < 0) return false;
     const candidate = value.substring(triggerStart, triggerEnd);
     if (candidate.toLowerCase() !== trigger.toLowerCase()) {
-      log("candidat ne correspond pas:", candidate, "vs", trigger);
       return false;
     }
     el.focus();
@@ -473,7 +458,6 @@
   function replaceInEditable(target, trigger, html, mode) {
     const sel = window.getSelection();
     if (!sel || !sel.rangeCount) {
-      log("replaceInEditable: pas de sélection");
       return false;
     }
     const caretRange = sel.getRangeAt(0).cloneRange();
@@ -481,19 +465,16 @@
       ? target
       : findEditableHost(caretRange.endContainer) || target;
     if (!actualRoot.contains(caretRange.endContainer)) {
-      log("replaceInEditable: range hors cible", caretRange.endContainer);
       return false;
     }
 
     const charsBack = mode === "delim" ? 1 : 0;
     const triggerRange = buildRangeBackward(actualRoot, caretRange, charsBack, trigger.length);
     if (!triggerRange) {
-      log("buildRangeBackward a échoué");
       return false;
     }
     const found = triggerRange.toString();
     if (found.toLowerCase() !== trigger.toLowerCase()) {
-      log("contenu différent:", JSON.stringify(found), "vs", trigger);
       return false;
     }
 
@@ -523,7 +504,6 @@
     function cleanupOrphanTrigger() {
       const loc = relocateTrigger(actualRoot, trigger);
       if (!loc) {
-        log("cleanup: trigger introuvable");
         return false;
       }
       setSelection(loc);
@@ -532,12 +512,9 @@
       //    lieu d'annuler notre mutation DOM au prochain cycle de rendu.
       try {
         if (document.execCommand("delete", false) && curLen() === expectedLen) {
-          log("cleanup via execCommand delete");
           return true;
         }
-      } catch (err) {
-        log("cleanup execCommand delete a échoué", err);
-      }
+      } catch (_) {}
       // 2. Fallback : suppression DOM directe + InputEvent
       try {
         const loc2 = relocateTrigger(actualRoot, trigger) || loc;
@@ -546,9 +523,7 @@
           inputType: "deleteContentBackward",
           bubbles: true,
         }));
-        log("cleanup via DOM direct, len=", curLen(), "attendu=", expectedLen);
-      } catch (err) {
-        log("cleanup DOM a échoué", err);
+      } catch (_) {
         return false;
       }
       return true;
@@ -557,38 +532,31 @@
     // Tente une méthode d'insertion. Si l'éditeur a tout bien fait → "ok".
     // S'il a juste appendé le texte sans supprimer le trigger → "appended"
     // (on arrête tout de suite pour éviter d'insérer plusieurs fois).
-    function tryInsert(label, fn) {
+    function tryInsert(fn) {
       try {
         setSelection(triggerRange);
         fn();
-      } catch (err) {
-        log(label + " a échoué", err);
+      } catch (_) {
         return "error";
       }
       const cur = curLen();
-      if (cur === expectedLen) {
-        log("inséré via " + label);
-        return "ok";
-      }
-      if (cur > before.length) {
-        log(label + ": texte inséré sans suppression du trigger (len=" + cur + ", attendu=" + expectedLen + "), cleanup requis");
-        return "appended";
-      }
+      if (cur === expectedLen) return "ok";
+      if (cur > before.length) return "appended";
       return "noop";
     }
 
     const methods = [
-      ["paste event", () => {
+      () => {
         const dt = new DataTransfer();
         dt.setData("text/html", html);
         dt.setData("text/plain", plain);
         target.dispatchEvent(new ClipboardEvent("paste", {
           bubbles: true, cancelable: true, clipboardData: dt,
         }));
-      }],
-      ["insertText", () => { document.execCommand("insertText", false, plain); }],
-      ["insertHTML", () => { document.execCommand("insertHTML", false, html); }],
-      ["beforeinput", () => {
+      },
+      () => { document.execCommand("insertText", false, plain); },
+      () => { document.execCommand("insertHTML", false, html); },
+      () => {
         const dt = new DataTransfer();
         dt.setData("text/html", html);
         dt.setData("text/plain", plain);
@@ -598,19 +566,18 @@
           dataTransfer: dt,
           bubbles: true, cancelable: true, composed: true,
         }));
-      }],
+      },
     ];
 
-    for (const [label, fn] of methods) {
-      const r = tryInsert(label, fn);
+    for (const fn of methods) {
+      const r = tryInsert(fn);
       if (r === "ok") {
         target.dispatchEvent(new Event("input", { bubbles: true }));
         return true;
       }
       if (r === "appended") {
-        if (cleanupOrphanTrigger() && curLen() === expectedLen) return true;
-        // Cleanup raté : on retourne quand même true pour ne pas re-insérer
-        // (l'utilisateur peut effacer le trigger résiduel manuellement).
+        // Cleanup ou non, on retourne true pour ne pas re-insérer.
+        cleanupOrphanTrigger();
         return true;
       }
     }
@@ -646,10 +613,8 @@
         data: plain,
         bubbles: true,
       }));
-      log("inséré via DOM direct");
       return true;
-    } catch (err) {
-      console.warn(LOG, "fallback DOM insert a échoué", err);
+    } catch (_) {
       return false;
     }
   }
@@ -676,12 +641,9 @@
   }
 
   function confirmReplacement() {
-    log("confirmReplacement: pending =", !!pending);
     if (!pending) return hidePopup();
     const { target, shortcut, mode, caretInfo } = pending;
-    log("cible:", target.tagName, "isCE:", target.isContentEditable, "mode:", mode);
     if (!target || !target.isConnected) {
-      log("cible déconnectée");
       return hidePopup();
     }
     restoreCaret(target, caretInfo);
@@ -691,9 +653,7 @@
     } else if (target.isContentEditable) {
       ok = replaceInEditable(target, shortcut.trigger, shortcut.html, mode);
     } else {
-      log("cible non gérée:", target);
     }
-    log("remplacement", ok ? "OK" : "ÉCHEC", "pour", shortcut.trigger);
     if (ok) recordSavings(shortcut);
     hidePopup();
   }
@@ -719,10 +679,7 @@
     const key = todayKey();
     try {
       chrome.storage.local.get(STATS_KEY, (data) => {
-        if (chrome.runtime.lastError) {
-          log("recordSavings get a échoué", chrome.runtime.lastError.message);
-          return;
-        }
+        if (chrome.runtime.lastError) return;
         try {
           const stats = (data && data[STATS_KEY]) || {};
           stats[key] = (stats[key] || 0) + saved;
@@ -734,17 +691,11 @@
             if (k < cutoffKey) delete stats[k];
           }
           chrome.storage.local.set({ [STATS_KEY]: stats }, () => {
-            if (chrome.runtime.lastError) {
-              log("recordSavings set a échoué", chrome.runtime.lastError.message);
-            }
+            void chrome.runtime.lastError;
           });
-        } catch (err) {
-          log("recordSavings inner a échoué", err);
-        }
+        } catch (_) {}
       });
-    } catch (err) {
-      log("recordSavings a échoué", err);
-    }
+    } catch (_) {}
   }
 
   function handleEditableEvent(rawTarget) {
@@ -763,7 +714,6 @@
 
     const match = findMatch(text);
     if (match) {
-      log("match:", match.shortcut.trigger, "mode:", match.mode);
       showPopup(target, match.shortcut, match.mode);
     } else if (pending && pending.target === target) {
       hidePopup();
@@ -839,5 +789,4 @@
 
   window.addEventListener("blur", () => hidePopup());
 
-  log("content script chargé sur", location.href);
 })();

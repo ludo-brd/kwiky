@@ -1,4 +1,7 @@
 const STORAGE_KEY = "shortcuts";
+const STATS_KEY = "stats";
+// Hypothèse de saisie : 200 caractères/minute (~40 mots/min, valeur médiane)
+const MS_PER_CHAR = 300;
 
 const listView = document.getElementById("listView");
 const editView = document.getElementById("editView");
@@ -368,4 +371,57 @@ importFile.addEventListener("change", async () => {
   alert(`${valid.length} raccourci(s) importé(s).`);
 });
 
+function dayKey(d) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+function formatSavedTime(chars) {
+  const totalSec = Math.round((chars * MS_PER_CHAR) / 1000);
+  if (totalSec <= 0) return "0s";
+  if (totalSec < 60) return `${totalSec}s`;
+  const totalMin = Math.floor(totalSec / 60);
+  const restSec = totalSec % 60;
+  if (totalMin < 60) {
+    return restSec ? `${totalMin}m ${restSec}s` : `${totalMin}m`;
+  }
+  const hours = Math.floor(totalMin / 60);
+  const restMin = totalMin % 60;
+  return restMin ? `${hours}h ${restMin}m` : `${hours}h`;
+}
+
+async function loadStats() {
+  const data = await chrome.storage.local.get(STATS_KEY);
+  const stats = (data && data[STATS_KEY]) || {};
+  const now = new Date();
+  const today = dayKey(now);
+
+  // Lundi de la semaine courante (semaine ISO, lundi → dimanche)
+  const dow = (now.getDay() + 6) % 7;
+  const monday = new Date(now);
+  monday.setDate(now.getDate() - dow);
+  const mondayKey = dayKey(monday);
+
+  const monthPrefix = today.slice(0, 7);
+
+  let dayChars = stats[today] || 0;
+  let weekChars = 0;
+  let monthChars = 0;
+  for (const [k, v] of Object.entries(stats)) {
+    if (k >= mondayKey && k <= today) weekChars += v;
+    if (k.startsWith(monthPrefix)) monthChars += v;
+  }
+
+  document.getElementById("statsToday").textContent = formatSavedTime(dayChars);
+  document.getElementById("statsWeek").textContent = formatSavedTime(weekChars);
+  document.getElementById("statsMonth").textContent = formatSavedTime(monthChars);
+}
+
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === "local" && changes[STATS_KEY]) loadStats();
+});
+
 loadShortcuts();
+loadStats();

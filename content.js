@@ -694,7 +694,39 @@
       log("cible non gérée:", target);
     }
     log("remplacement", ok ? "OK" : "ÉCHEC", "pour", shortcut.trigger);
+    if (ok) recordSavings(shortcut);
     hidePopup();
+  }
+
+  const STATS_KEY = "stats";
+  const STATS_RETENTION_DAYS = 95;
+
+  function todayKey() {
+    const d = new Date();
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    return `${y}-${m}-${day}`;
+  }
+
+  function recordSavings(shortcut) {
+    if (!chrome?.storage?.local) return;
+    const plainLen = htmlToPlain(shortcut.html || "").length;
+    const saved = plainLen - (shortcut.trigger || "").length;
+    if (saved <= 0) return;
+    const key = todayKey();
+    chrome.storage.local.get(STATS_KEY, (data) => {
+      const stats = (data && data[STATS_KEY]) || {};
+      stats[key] = (stats[key] || 0) + saved;
+      // Purge des entrées trop anciennes pour éviter de gonfler le storage.
+      const cutoff = new Date();
+      cutoff.setDate(cutoff.getDate() - STATS_RETENTION_DAYS);
+      const cutoffKey = `${cutoff.getFullYear()}-${String(cutoff.getMonth() + 1).padStart(2, "0")}-${String(cutoff.getDate()).padStart(2, "0")}`;
+      for (const k of Object.keys(stats)) {
+        if (k < cutoffKey) delete stats[k];
+      }
+      chrome.storage.local.set({ [STATS_KEY]: stats });
+    });
   }
 
   function handleEditableEvent(rawTarget) {

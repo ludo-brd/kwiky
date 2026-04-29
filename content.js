@@ -175,7 +175,7 @@
     popupHost = document.createElement("div");
     popupHost.id = "raccourcis-host";
     popupHost.style.cssText =
-      "all: initial; position: fixed; top: 16px; right: 16px; z-index: 2147483647;";
+      "all: initial; position: fixed; top: 16px; right: 16px; z-index: 2147483647; pointer-events: none;";
     document.documentElement.appendChild(popupHost);
     popupShadow = popupHost.attachShadow({ mode: "open" });
     popupShadow.innerHTML = `
@@ -190,12 +190,12 @@
           box-shadow: 0 18px 48px rgba(15, 23, 42, 0.18), 0 2px 6px rgba(15, 23, 42, 0.06);
           border: 1px solid rgba(15, 23, 42, 0.06);
           overflow: hidden;
-          pointer-events: auto;
+          pointer-events: none;
           transform: translateY(-12px) scale(0.98);
           opacity: 0;
           transition: opacity 160ms ease, transform 200ms cubic-bezier(0.2, 0.9, 0.3, 1.2);
         }
-        .rcx-popup.show { opacity: 1; transform: translateY(0) scale(1); }
+        .rcx-popup.show { opacity: 1; transform: translateY(0) scale(1); pointer-events: auto; }
         .rcx-head {
           display: flex;
           align-items: center;
@@ -489,6 +489,8 @@
     sel.addRange(triggerRange);
 
     const plain = htmlToPlain(html);
+    const snapshot = () => actualRoot.textContent || "";
+    const before = snapshot();
 
     // 1. Paste event — intercepté par Quill, Draft.js, Slate, TinyMCE, etc.
     try {
@@ -501,32 +503,77 @@
         clipboardData: dt,
       });
       target.dispatchEvent(pasteEv);
-      if (pasteEv.defaultPrevented) {
+      if (pasteEv.defaultPrevented || snapshot() !== before) {
         target.dispatchEvent(new Event("input", { bubbles: true }));
+        log("inséré via paste event");
         return true;
       }
     } catch (err) {
       log("paste event a échoué", err);
     }
 
-    // 2. execCommand insertHTML
-    let success = false;
+    // Re-sélectionne au cas où l'éditeur (ProseMirror/Lexical) aurait modifié la sélection
     try {
-      success = document.execCommand("insertHTML", false, html);
-    } catch (err) {
-      log("execCommand insertHTML a échoué", err);
-    }
-    if (success) return true;
+      sel.removeAllRanges();
+      sel.addRange(triggerRange);
+    } catch (_) {}
 
-    // 3. execCommand insertText (texte brut)
+    // 2. execCommand insertText — déclenche un vrai beforeinput (ProseMirror, Lexical)
     try {
-      success = document.execCommand("insertText", false, plain);
+      document.execCommand("insertText", false, plain);
+      if (snapshot() !== before) {
+        log("inséré via insertText");
+        return true;
+      }
     } catch (err) {
       log("execCommand insertText a échoué", err);
     }
-    if (success) return true;
 
-    // 4. Manipulation DOM directe
+    try {
+      sel.removeAllRanges();
+      sel.addRange(triggerRange);
+    } catch (_) {}
+
+    // 3. execCommand insertHTML
+    try {
+      document.execCommand("insertHTML", false, html);
+      if (snapshot() !== before) {
+        log("inséré via insertHTML");
+        return true;
+      }
+    } catch (err) {
+      log("execCommand insertHTML a échoué", err);
+    }
+
+    try {
+      sel.removeAllRanges();
+      sel.addRange(triggerRange);
+    } catch (_) {}
+
+    // 4. beforeinput synthétique (Lexical & co écoutent ce signal)
+    try {
+      const dt2 = new DataTransfer();
+      dt2.setData("text/html", html);
+      dt2.setData("text/plain", plain);
+      const bi = new InputEvent("beforeinput", {
+        inputType: "insertReplacementText",
+        data: plain,
+        dataTransfer: dt2,
+        bubbles: true,
+        cancelable: true,
+        composed: true,
+      });
+      target.dispatchEvent(bi);
+      if (bi.defaultPrevented || snapshot() !== before) {
+        target.dispatchEvent(new Event("input", { bubbles: true }));
+        log("inséré via beforeinput");
+        return true;
+      }
+    } catch (err) {
+      log("beforeinput a échoué", err);
+    }
+
+    // 5. Manipulation DOM directe (dernier recours)
     try {
       triggerRange.deleteContents();
       const tmp = document.createElement("div");
@@ -546,6 +593,7 @@
         sel.addRange(after);
       }
       target.dispatchEvent(new Event("input", { bubbles: true }));
+      log("inséré via DOM direct");
       return true;
     } catch (err) {
       console.warn(LOG, "fallback DOM insert a échoué", err);

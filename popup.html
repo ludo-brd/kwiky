@@ -37,18 +37,19 @@
     <ul id="shortcutsList" class="shortcuts-list"></ul>
 
     <div class="stats-footer" title="Estimation basée sur 200 caractères/minute">
-      <svg class="stats-icon" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-        <circle cx="8" cy="9" r="5.25" stroke="currentColor" stroke-width="1.4"/>
-        <path d="M8 6.5V9l1.6 1.2" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
-        <path d="M6 2h4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
-      </svg>
-      <span class="stats-line">
-        Temps gagné&nbsp;: aujourd'hui&nbsp;<strong id="statsToday">0s</strong>
-        <span class="stats-sep">·</span>
-        cette semaine&nbsp;<strong id="statsWeek">0s</strong>
-        <span class="stats-sep">·</span>
-        ce mois&nbsp;<strong id="statsMonth">0s</strong>
-      </span>
+      <div class="stats-header">
+        <svg class="stats-icon" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+          <circle cx="8" cy="9" r="5.25" stroke="currentColor" stroke-width="1.4"/>
+          <path d="M8 6.5V9l1.6 1.2" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+          <path d="M6 2h4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+        </svg>
+        <span class="stats-title">Temps gagné</span>
+      </div>
+      <ul class="stats-rows">
+        <li><span class="stats-label">Aujourd'hui</span><strong id="statsToday">0s</strong></li>
+        <li><span class="stats-label">Cette semaine</span><strong id="statsWeek">0s</strong></li>
+        <li><span class="stats-label">Ce mois</span><strong id="statsMonth">0s</strong></li>
+      </ul>
     </div>
 
     <footer class="list-footer">

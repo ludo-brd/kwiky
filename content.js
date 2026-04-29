@@ -35,6 +35,7 @@
   let popupShadow = null;
   let popupRoot = null;
   let popupTimer = null;
+  let popupHideTimer = null;
   let pending = null;
   let dismissed = null;
 
@@ -354,6 +355,11 @@
 
   function showPopup(target, shortcut, mode) {
     ensurePopup();
+    if (popupHideTimer) {
+      clearTimeout(popupHideTimer);
+      popupHideTimer = null;
+    }
+    popupHost.style.display = "";
     const caretInfo = captureCaret(target);
     pending = { target, shortcut, mode, caretInfo };
     popupShadow.querySelector("[data-pill]").textContent = shortcut.trigger;
@@ -370,6 +376,13 @@
       popupTimer = null;
     }
     if (popupRoot) popupRoot.classList.remove("show");
+    if (popupHideTimer) clearTimeout(popupHideTimer);
+    popupHideTimer = setTimeout(() => {
+      if (popupHost && popupRoot && !popupRoot.classList.contains("show")) {
+        popupHost.style.display = "none";
+      }
+      popupHideTimer = null;
+    }, 240);
     if (markDismissed && pending) {
       try {
         const text = getTextBeforeCaret(pending.target);
@@ -489,10 +502,17 @@
     sel.addRange(triggerRange);
 
     const plain = htmlToPlain(html);
-    const snapshot = () => actualRoot.textContent || "";
-    const before = snapshot();
+    const before = (actualRoot.textContent || "");
+    const expectedLen = before.length - trigger.length + plain.length;
+    const replaced = () => (actualRoot.textContent || "").length === expectedLen;
+    const reselect = () => {
+      try {
+        sel.removeAllRanges();
+        sel.addRange(triggerRange);
+      } catch (_) {}
+    };
 
-    // 1. Paste event — intercepté par Quill, Draft.js, Slate, TinyMCE, etc.
+    // 1. Paste event — Quill, Draft.js, Slate, TinyMCE, CKEditor 5
     try {
       const dt = new DataTransfer();
       dt.setData("text/html", html);
@@ -503,7 +523,7 @@
         clipboardData: dt,
       });
       target.dispatchEvent(pasteEv);
-      if (pasteEv.defaultPrevented || snapshot() !== before) {
+      if (replaced()) {
         target.dispatchEvent(new Event("input", { bubbles: true }));
         log("inséré via paste event");
         return true;
@@ -512,16 +532,12 @@
       log("paste event a échoué", err);
     }
 
-    // Re-sélectionne au cas où l'éditeur (ProseMirror/Lexical) aurait modifié la sélection
-    try {
-      sel.removeAllRanges();
-      sel.addRange(triggerRange);
-    } catch (_) {}
+    reselect();
 
-    // 2. execCommand insertText — déclenche un vrai beforeinput (ProseMirror, Lexical)
+    // 2. execCommand insertText — déclenche un beforeinput natif (ProseMirror, Lexical)
     try {
       document.execCommand("insertText", false, plain);
-      if (snapshot() !== before) {
+      if (replaced()) {
         log("inséré via insertText");
         return true;
       }
@@ -529,15 +545,12 @@
       log("execCommand insertText a échoué", err);
     }
 
-    try {
-      sel.removeAllRanges();
-      sel.addRange(triggerRange);
-    } catch (_) {}
+    reselect();
 
     // 3. execCommand insertHTML
     try {
       document.execCommand("insertHTML", false, html);
-      if (snapshot() !== before) {
+      if (replaced()) {
         log("inséré via insertHTML");
         return true;
       }
@@ -545,12 +558,9 @@
       log("execCommand insertHTML a échoué", err);
     }
 
-    try {
-      sel.removeAllRanges();
-      sel.addRange(triggerRange);
-    } catch (_) {}
+    reselect();
 
-    // 4. beforeinput synthétique (Lexical & co écoutent ce signal)
+    // 4. beforeinput synthétique
     try {
       const dt2 = new DataTransfer();
       dt2.setData("text/html", html);
@@ -564,7 +574,7 @@
         composed: true,
       });
       target.dispatchEvent(bi);
-      if (bi.defaultPrevented || snapshot() !== before) {
+      if (replaced()) {
         target.dispatchEvent(new Event("input", { bubbles: true }));
         log("inséré via beforeinput");
         return true;
@@ -573,9 +583,27 @@
       log("beforeinput a échoué", err);
     }
 
-    // 5. Manipulation DOM directe (dernier recours)
+    // 5. Manipulation DOM directe : supprime le trigger (en le re-localisant si nécessaire)
+    //    puis insère le HTML. Couvre le cas où l'éditeur a inséré le texte au curseur
+    //    sans honorer notre sélection (laissant le trigger en place).
     try {
-      triggerRange.deleteContents();
+      let workRange = triggerRange;
+      if (!workRange.collapsed) {
+        try {
+          if (workRange.toString().toLowerCase() !== trigger.toLowerCase()) {
+            workRange = relocateTrigger(actualRoot, trigger) || workRange;
+          }
+        } catch (_) {
+          workRange = relocateTrigger(actualRoot, trigger) || workRange;
+        }
+      } else {
+        workRange = relocateTrigger(actualRoot, trigger) || workRange;
+      }
+
+      try { workRange.deleteContents(); } catch (_) {}
+
+      const insertPoint = workRange.cloneRange();
+      insertPoint.collapse(true);
       const tmp = document.createElement("div");
       tmp.innerHTML = html;
       const frag = document.createDocumentFragment();
@@ -584,7 +612,7 @@
         lastNode = tmp.firstChild;
         frag.appendChild(lastNode);
       }
-      triggerRange.insertNode(frag);
+      insertPoint.insertNode(frag);
       if (lastNode) {
         const after = document.createRange();
         after.setStartAfter(lastNode);
@@ -592,13 +620,38 @@
         sel.removeAllRanges();
         sel.addRange(after);
       }
-      target.dispatchEvent(new Event("input", { bubbles: true }));
+      target.dispatchEvent(new InputEvent("input", {
+        inputType: "insertText",
+        data: plain,
+        bubbles: true,
+      }));
       log("inséré via DOM direct");
       return true;
     } catch (err) {
       console.warn(LOG, "fallback DOM insert a échoué", err);
       return false;
     }
+  }
+
+  function relocateTrigger(root, trigger) {
+    const lowerTrigger = trigger.toLowerCase();
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null);
+    let node;
+    let lastMatch = null;
+    while ((node = walker.nextNode())) {
+      const lower = node.nodeValue.toLowerCase();
+      let from = 0;
+      let idx;
+      while ((idx = lower.indexOf(lowerTrigger, from)) !== -1) {
+        lastMatch = { node, idx };
+        from = idx + lowerTrigger.length;
+      }
+    }
+    if (!lastMatch) return null;
+    const range = document.createRange();
+    range.setStart(lastMatch.node, lastMatch.idx);
+    range.setEnd(lastMatch.node, lastMatch.idx + trigger.length);
+    return range;
   }
 
   function confirmReplacement() {

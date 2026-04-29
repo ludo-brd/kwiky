@@ -161,6 +161,38 @@
     return (tmp.textContent || "").replace(/\n{3,}/g, "\n\n").trim();
   }
 
+  // Aplatit les blocs (<p>, <div>, headings, blockquote, pre) en <br>
+  // séparateurs. CKEditor 5 / ProseMirror / Lexical convertissent chaque
+  // bloc collé en paragraphe modèle, ce qui splitte le paragraphe courant
+  // et insère des lignes parasites. Le formatage inline (gras, italique,
+  // couleurs, etc.) est préservé : seuls les wrappers de bloc sont défaits.
+  function htmlToInlineHtml(html) {
+    const tmp = document.createElement("div");
+    tmp.innerHTML = html;
+    while (true) {
+      const block = tmp.querySelector(
+        "p, div, h1, h2, h3, h4, h5, h6, blockquote, pre"
+      );
+      if (!block) break;
+      const visuallyEmpty =
+        !block.textContent.trim() &&
+        block.querySelectorAll("br").length <= 1;
+      const br = document.createElement("br");
+      if (visuallyEmpty) {
+        block.replaceWith(br);
+      } else {
+        block.replaceWith(br, ...block.childNodes);
+      }
+    }
+    while (tmp.firstChild && tmp.firstChild.nodeName === "BR") {
+      tmp.removeChild(tmp.firstChild);
+    }
+    while (tmp.lastChild && tmp.lastChild.nodeName === "BR") {
+      tmp.removeChild(tmp.lastChild);
+    }
+    return tmp.innerHTML;
+  }
+
   function ensurePopup() {
     if (popupHost && document.documentElement.contains(popupHost)) return;
     popupHost = document.createElement("div");
@@ -483,6 +515,16 @@
     sel.addRange(triggerRange);
 
     const plain = htmlToPlain(html);
+    // Sur CKE5/ProseMirror/Lexical, coller un HTML qui contient des blocs
+    // (<p>, <div>) en plein paragraphe split le paragraphe courant et
+    // insère des lignes parasites. On aplatit alors les blocs en <br>
+    // pour rester inline (formatage inline conservé).
+    const isModelEditor = !!(
+      actualRoot.closest?.(".ck-editor__editable, .ck-content") ||
+      actualRoot.closest?.(".ProseMirror") ||
+      actualRoot.closest?.("[data-lexical-editor]")
+    );
+    const insertHtml = isModelEditor ? htmlToInlineHtml(html) : html;
     const before = (actualRoot.textContent || "");
     const expectedLen = before.length - trigger.length + plain.length;
     const curLen = () => (actualRoot.textContent || "").length;
@@ -548,17 +590,17 @@
     const methods = [
       () => {
         const dt = new DataTransfer();
-        dt.setData("text/html", html);
+        dt.setData("text/html", insertHtml);
         dt.setData("text/plain", plain);
         target.dispatchEvent(new ClipboardEvent("paste", {
           bubbles: true, cancelable: true, clipboardData: dt,
         }));
       },
       () => { document.execCommand("insertText", false, plain); },
-      () => { document.execCommand("insertHTML", false, html); },
+      () => { document.execCommand("insertHTML", false, insertHtml); },
       () => {
         const dt = new DataTransfer();
-        dt.setData("text/html", html);
+        dt.setData("text/html", insertHtml);
         dt.setData("text/plain", plain);
         target.dispatchEvent(new InputEvent("beforeinput", {
           inputType: "insertReplacementText",
@@ -593,7 +635,7 @@
       const insertPoint = workRange.cloneRange();
       insertPoint.collapse(true);
       const tmp = document.createElement("div");
-      tmp.innerHTML = html;
+      tmp.innerHTML = insertHtml;
       const frag = document.createDocumentFragment();
       let lastNode = null;
       while (tmp.firstChild) {

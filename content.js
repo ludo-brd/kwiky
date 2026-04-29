@@ -504,102 +504,95 @@
     const plain = htmlToPlain(html);
     const before = (actualRoot.textContent || "");
     const expectedLen = before.length - trigger.length + plain.length;
-    const replaced = () => (actualRoot.textContent || "").length === expectedLen;
-    const reselect = () => {
+    const curLen = () => (actualRoot.textContent || "").length;
+
+    // Supprime le trigger restant dans le DOM (re-localisé) et notifie l'éditeur.
+    // Utilisé quand un éditeur (CKEditor 5, Zendesk, ...) a inséré le texte au
+    // curseur sans honorer notre sélection — le trigger est donc encore présent.
+    function cleanupOrphanTrigger() {
+      const loc = relocateTrigger(actualRoot, trigger);
+      if (!loc) return false;
+      try {
+        loc.deleteContents();
+        target.dispatchEvent(new InputEvent("input", {
+          inputType: "deleteContentBackward",
+          bubbles: true,
+        }));
+      } catch (err) {
+        log("cleanup trigger a échoué", err);
+        return false;
+      }
+      return true;
+    }
+
+    // Tente une méthode d'insertion. Si l'éditeur a tout bien fait → "ok".
+    // S'il a juste appendé le texte sans supprimer le trigger → "appended"
+    // (on arrête tout de suite pour éviter d'insérer plusieurs fois).
+    function tryInsert(label, fn) {
       try {
         sel.removeAllRanges();
-        sel.addRange(triggerRange);
-      } catch (_) {}
-    };
+        try { sel.addRange(triggerRange); } catch (_) {}
+        fn();
+      } catch (err) {
+        log(label + " a échoué", err);
+        return "error";
+      }
+      const cur = curLen();
+      if (cur === expectedLen) {
+        log("inséré via " + label);
+        return "ok";
+      }
+      if (cur > before.length) {
+        log(label + ": texte inséré sans suppression du trigger, cleanup requis");
+        return "appended";
+      }
+      return "noop";
+    }
 
-    // 1. Paste event — Quill, Draft.js, Slate, TinyMCE, CKEditor 5
-    try {
-      const dt = new DataTransfer();
-      dt.setData("text/html", html);
-      dt.setData("text/plain", plain);
-      const pasteEv = new ClipboardEvent("paste", {
-        bubbles: true,
-        cancelable: true,
-        clipboardData: dt,
-      });
-      target.dispatchEvent(pasteEv);
-      if (replaced()) {
+    const methods = [
+      ["paste event", () => {
+        const dt = new DataTransfer();
+        dt.setData("text/html", html);
+        dt.setData("text/plain", plain);
+        target.dispatchEvent(new ClipboardEvent("paste", {
+          bubbles: true, cancelable: true, clipboardData: dt,
+        }));
+      }],
+      ["insertText", () => { document.execCommand("insertText", false, plain); }],
+      ["insertHTML", () => { document.execCommand("insertHTML", false, html); }],
+      ["beforeinput", () => {
+        const dt = new DataTransfer();
+        dt.setData("text/html", html);
+        dt.setData("text/plain", plain);
+        target.dispatchEvent(new InputEvent("beforeinput", {
+          inputType: "insertReplacementText",
+          data: plain,
+          dataTransfer: dt,
+          bubbles: true, cancelable: true, composed: true,
+        }));
+      }],
+    ];
+
+    for (const [label, fn] of methods) {
+      const r = tryInsert(label, fn);
+      if (r === "ok") {
         target.dispatchEvent(new Event("input", { bubbles: true }));
-        log("inséré via paste event");
         return true;
       }
-    } catch (err) {
-      log("paste event a échoué", err);
-    }
-
-    reselect();
-
-    // 2. execCommand insertText — déclenche un beforeinput natif (ProseMirror, Lexical)
-    try {
-      document.execCommand("insertText", false, plain);
-      if (replaced()) {
-        log("inséré via insertText");
+      if (r === "appended") {
+        if (cleanupOrphanTrigger() && curLen() === expectedLen) return true;
+        // Cleanup raté : on retourne quand même true pour ne pas re-insérer
+        // (l'utilisateur peut effacer le trigger résiduel manuellement).
         return true;
       }
-    } catch (err) {
-      log("execCommand insertText a échoué", err);
     }
 
-    reselect();
-
-    // 3. execCommand insertHTML
-    try {
-      document.execCommand("insertHTML", false, html);
-      if (replaced()) {
-        log("inséré via insertHTML");
-        return true;
-      }
-    } catch (err) {
-      log("execCommand insertHTML a échoué", err);
-    }
-
-    reselect();
-
-    // 4. beforeinput synthétique
-    try {
-      const dt2 = new DataTransfer();
-      dt2.setData("text/html", html);
-      dt2.setData("text/plain", plain);
-      const bi = new InputEvent("beforeinput", {
-        inputType: "insertReplacementText",
-        data: plain,
-        dataTransfer: dt2,
-        bubbles: true,
-        cancelable: true,
-        composed: true,
-      });
-      target.dispatchEvent(bi);
-      if (replaced()) {
-        target.dispatchEvent(new Event("input", { bubbles: true }));
-        log("inséré via beforeinput");
-        return true;
-      }
-    } catch (err) {
-      log("beforeinput a échoué", err);
-    }
-
-    // 5. Manipulation DOM directe : supprime le trigger (en le re-localisant si nécessaire)
-    //    puis insère le HTML. Couvre le cas où l'éditeur a inséré le texte au curseur
-    //    sans honorer notre sélection (laissant le trigger en place).
+    // Aucune méthode n'a inséré → fallback DOM direct (delete + insert).
     try {
       let workRange = triggerRange;
-      if (!workRange.collapsed) {
-        try {
-          if (workRange.toString().toLowerCase() !== trigger.toLowerCase()) {
-            workRange = relocateTrigger(actualRoot, trigger) || workRange;
-          }
-        } catch (_) {
-          workRange = relocateTrigger(actualRoot, trigger) || workRange;
-        }
-      } else {
+      if (workRange.collapsed || workRange.toString().toLowerCase() !== trigger.toLowerCase()) {
         workRange = relocateTrigger(actualRoot, trigger) || workRange;
       }
-
       try { workRange.deleteContents(); } catch (_) {}
 
       const insertPoint = workRange.cloneRange();

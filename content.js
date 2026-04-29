@@ -710,23 +710,41 @@
   }
 
   function recordSavings(shortcut) {
-    if (!chrome?.storage?.local) return;
+    // chrome.runtime.id est undefined si l'extension a été rechargée alors que
+    // ce content script tourne encore sur l'onglet → "Extension context invalidated".
+    if (!chrome?.runtime?.id || !chrome?.storage?.local) return;
     const plainLen = htmlToPlain(shortcut.html || "").length;
     const saved = plainLen - (shortcut.trigger || "").length;
     if (saved <= 0) return;
     const key = todayKey();
-    chrome.storage.local.get(STATS_KEY, (data) => {
-      const stats = (data && data[STATS_KEY]) || {};
-      stats[key] = (stats[key] || 0) + saved;
-      // Purge des entrées trop anciennes pour éviter de gonfler le storage.
-      const cutoff = new Date();
-      cutoff.setDate(cutoff.getDate() - STATS_RETENTION_DAYS);
-      const cutoffKey = `${cutoff.getFullYear()}-${String(cutoff.getMonth() + 1).padStart(2, "0")}-${String(cutoff.getDate()).padStart(2, "0")}`;
-      for (const k of Object.keys(stats)) {
-        if (k < cutoffKey) delete stats[k];
-      }
-      chrome.storage.local.set({ [STATS_KEY]: stats });
-    });
+    try {
+      chrome.storage.local.get(STATS_KEY, (data) => {
+        if (chrome.runtime.lastError) {
+          log("recordSavings get a échoué", chrome.runtime.lastError.message);
+          return;
+        }
+        try {
+          const stats = (data && data[STATS_KEY]) || {};
+          stats[key] = (stats[key] || 0) + saved;
+          // Purge des entrées trop anciennes pour éviter de gonfler le storage.
+          const cutoff = new Date();
+          cutoff.setDate(cutoff.getDate() - STATS_RETENTION_DAYS);
+          const cutoffKey = `${cutoff.getFullYear()}-${String(cutoff.getMonth() + 1).padStart(2, "0")}-${String(cutoff.getDate()).padStart(2, "0")}`;
+          for (const k of Object.keys(stats)) {
+            if (k < cutoffKey) delete stats[k];
+          }
+          chrome.storage.local.set({ [STATS_KEY]: stats }, () => {
+            if (chrome.runtime.lastError) {
+              log("recordSavings set a échoué", chrome.runtime.lastError.message);
+            }
+          });
+        } catch (err) {
+          log("recordSavings inner a échoué", err);
+        }
+      });
+    } catch (err) {
+      log("recordSavings a échoué", err);
+    }
   }
 
   function handleEditableEvent(rawTarget) {

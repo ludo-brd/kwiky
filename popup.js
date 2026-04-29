@@ -51,18 +51,76 @@ function plainPreview(html) {
   return (tmp.textContent || "").trim();
 }
 
+let draggingId = null;
+
+function clearDropIndicators() {
+  shortcutsList.querySelectorAll(".drop-before, .drop-after").forEach((el) => {
+    el.classList.remove("drop-before", "drop-after");
+  });
+}
+
+function handleDragStart(e) {
+  draggingId = e.currentTarget.dataset.id;
+  e.currentTarget.classList.add("dragging");
+  e.dataTransfer.effectAllowed = "move";
+  // Firefox exige une donnée pour démarrer le drag
+  try { e.dataTransfer.setData("text/plain", draggingId); } catch (_) {}
+}
+
+function handleDragOver(e) {
+  if (!draggingId) return;
+  e.preventDefault();
+  e.dataTransfer.dropEffect = "move";
+  const target = e.currentTarget;
+  if (target.dataset.id === draggingId) return;
+  const rect = target.getBoundingClientRect();
+  const isAfter = e.clientY > rect.top + rect.height / 2;
+  clearDropIndicators();
+  target.classList.add(isAfter ? "drop-after" : "drop-before");
+}
+
+function handleDragLeave(e) {
+  e.currentTarget.classList.remove("drop-before", "drop-after");
+}
+
+async function handleDrop(e) {
+  e.preventDefault();
+  const target = e.currentTarget;
+  const targetId = target.dataset.id;
+  if (!draggingId || targetId === draggingId) {
+    clearDropIndicators();
+    return;
+  }
+  const rect = target.getBoundingClientRect();
+  const isAfter = e.clientY > rect.top + rect.height / 2;
+  const fromIdx = state.shortcuts.findIndex((s) => s.id === draggingId);
+  if (fromIdx < 0) return;
+  const [moved] = state.shortcuts.splice(fromIdx, 1);
+  let toIdx = state.shortcuts.findIndex((s) => s.id === targetId);
+  if (toIdx < 0) toIdx = state.shortcuts.length;
+  if (isAfter) toIdx += 1;
+  state.shortcuts.splice(toIdx, 0, moved);
+  await saveShortcuts();
+  renderList();
+}
+
+function handleDragEnd(e) {
+  e.currentTarget.classList.remove("dragging");
+  clearDropIndicators();
+  draggingId = null;
+}
+
 function renderList() {
   shortcutsList.innerHTML = "";
   const q = state.filter.trim().toLowerCase();
-  const items = state.shortcuts
-    .slice()
-    .sort((a, b) => a.trigger.localeCompare(b.trigger))
-    .filter(
-      (s) =>
-        !q ||
-        s.trigger.toLowerCase().includes(q) ||
-        plainPreview(s.html).toLowerCase().includes(q)
-    );
+  const isFiltering = !!q;
+  const items = isFiltering
+    ? state.shortcuts.filter(
+        (s) =>
+          s.trigger.toLowerCase().includes(q) ||
+          plainPreview(s.html).toLowerCase().includes(q)
+      )
+    : state.shortcuts;
 
   if (state.shortcuts.length === 0) {
     emptyState.classList.remove("hidden");
@@ -85,6 +143,15 @@ function renderList() {
     const li = document.createElement("li");
     li.className = "shortcut-item";
     li.dataset.id = s.id;
+    if (!isFiltering) {
+      li.draggable = true;
+      li.classList.add("draggable");
+      li.addEventListener("dragstart", handleDragStart);
+      li.addEventListener("dragover", handleDragOver);
+      li.addEventListener("dragleave", handleDragLeave);
+      li.addEventListener("drop", handleDrop);
+      li.addEventListener("dragend", handleDragEnd);
+    }
 
     const pill = document.createElement("span");
     pill.className = "trigger-pill";

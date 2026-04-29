@@ -186,6 +186,11 @@ body {
   border: 1px solid transparent;
 }
 .shortcut-item:hover { background: var(--surface); border-color: var(--border); }
+.shortcut-item.draggable { cursor: grab; }
+.shortcut-item.draggable:active { cursor: grabbing; }
+.shortcut-item.dragging { opacity: 0.4; }
+.shortcut-item.drop-before { box-shadow: inset 0 2px 0 0 var(--primary); }
+.shortcut-item.drop-after { box-shadow: inset 0 -2px 0 0 var(--primary); }
 
 .trigger-pill {
   flex-shrink: 0;

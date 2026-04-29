@@ -506,20 +506,49 @@
     const expectedLen = before.length - trigger.length + plain.length;
     const curLen = () => (actualRoot.textContent || "").length;
 
+    // Force les éditeurs qui lisent leur sélection model en cache (CKEditor 5,
+    // ProseMirror, Lexical) à se resynchroniser sur la sélection DOM courante
+    // AVANT que la prochaine commande ne lise une sélection périmée.
+    function setSelection(range) {
+      try {
+        sel.removeAllRanges();
+        sel.addRange(range);
+      } catch (_) {}
+      try { document.dispatchEvent(new Event("selectionchange")); } catch (_) {}
+    }
+
     // Supprime le trigger restant dans le DOM (re-localisé) et notifie l'éditeur.
     // Utilisé quand un éditeur (CKEditor 5, Zendesk, ...) a inséré le texte au
     // curseur sans honorer notre sélection — le trigger est donc encore présent.
     function cleanupOrphanTrigger() {
       const loc = relocateTrigger(actualRoot, trigger);
-      if (!loc) return false;
+      if (!loc) {
+        log("cleanup: trigger introuvable");
+        return false;
+      }
+      setSelection(loc);
+      // 1. Tente execCommand("delete") qui déclenche un beforeinput natif :
+      //    CKEditor 5 / ProseMirror / Lexical le traitent via leur modèle au
+      //    lieu d'annuler notre mutation DOM au prochain cycle de rendu.
       try {
-        loc.deleteContents();
+        if (document.execCommand("delete", false) && curLen() === expectedLen) {
+          log("cleanup via execCommand delete");
+          return true;
+        }
+      } catch (err) {
+        log("cleanup execCommand delete a échoué", err);
+      }
+      // 2. Fallback : suppression DOM directe + InputEvent
+      try {
+        const loc2 = relocateTrigger(actualRoot, trigger) || loc;
+        loc2.deleteContents();
         target.dispatchEvent(new InputEvent("input", {
           inputType: "deleteContentBackward",
           bubbles: true,
         }));
+        log("cleanup via DOM direct, len=", curLen(), "attendu=", expectedLen);
       } catch (err) {
-        log("cleanup trigger a échoué", err);
+        log("cleanup DOM a échoué", err);
         return false;
       }
       return true;
@@ -530,8 +559,7 @@
     // (on arrête tout de suite pour éviter d'insérer plusieurs fois).
     function tryInsert(label, fn) {
       try {
-        sel.removeAllRanges();
-        try { sel.addRange(triggerRange); } catch (_) {}
+        setSelection(triggerRange);
         fn();
       } catch (err) {
         log(label + " a échoué", err);
@@ -543,7 +571,7 @@
         return "ok";
       }
       if (cur > before.length) {
-        log(label + ": texte inséré sans suppression du trigger, cleanup requis");
+        log(label + ": texte inséré sans suppression du trigger (len=" + cur + ", attendu=" + expectedLen + "), cleanup requis");
         return "appended";
       }
       return "noop";
